@@ -19,10 +19,10 @@ function App() {
         {/* Example 1: Live badge */}
         <StatisticalChart
           data={sampleData}
-          width={1008}
-          height={630}
-          title="Revenue Growth vs MRR"
-          description="Compare your growth rate and revenue scale against peer benchmarks"
+          width={530}
+          height={370}
+          title="Gross Margin"
+          description="Profitability benchmark (%)"
           badgeType="live"
           badgeText="Live"
         />
@@ -30,10 +30,10 @@ function App() {
         {/* Example 2: Top badge */}
         <StatisticalChart
           data={sampleData}
-          width={1008}
-          height={630}
-          title="Revenue Growth vs MRR"
-          description="Compare your growth rate and revenue scale against peer benchmarks"
+          width={530}
+          height={370}
+          title="Gross Margin"
+          description="Profitability benchmark (%)"
           badgeType="top"
           badgeText="Top 10%"
         />
@@ -41,10 +41,10 @@ function App() {
         {/* Example 3: Bottom badge */}
         <StatisticalChart
           data={sampleData}
-          width={1008}
-          height={630}
-          title="Revenue Growth vs MRR"
-          description="Compare your growth rate and revenue scale against peer benchmarks"
+          width={530}
+          height={370}
+          title="Gross Margin"
+          description="Profitability benchmark (%)"
           badgeType="bottom"
           badgeText="Bottom 50%"
         />

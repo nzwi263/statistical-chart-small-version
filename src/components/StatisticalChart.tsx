@@ -31,6 +31,7 @@ interface LabelConfig {
   value: number;
   x: number;
   y: number;
+  flip: boolean; // true = render below the point, false = render above
   priority: number; // 3 = highest (Median), 2 = medium (Min/Max), 1 = lowest (Q1/Q3)
 }
 
@@ -46,40 +47,124 @@ const useLabelPositions = (
   xScale: d3.ScaleLinear<number, number>,
   boxY: number,
   whiskerY: number,
-  boxHeight: number
+  boxHeight: number,
+  topRegionHeight: number
 ): LabelConfig[] => {
   return useMemo(() => {
+    const padding = 15;
+    const minY = TOOLTIP_HEIGHT + padding;
+    const maxY = topRegionHeight - TOOLTIP_HEIGHT - padding;
+
     // Step 1: Calculate initial positions with staggered y-offsets
-    // Note: Tooltip renders at (y - 45) to (y - 5), so we need sufficient offset
+    // Default: render above the point (flip = false)
+    // If too close to top edge, flip to render below (flip = true)
     const labels: LabelConfig[] = [
-      { id: 'min', label: 'Minimum', value: data.min, x: xScale(data.min), y: whiskerY - 60, priority: 2 },
-      { id: 'q1', label: 'Q1', value: data.q1, x: xScale(data.q1), y: boxY - 50, priority: 1 },
-      { id: 'median', label: 'Median', value: data.median, x: xScale(data.median), y: boxY + boxHeight + 50, priority: 3 },
-      { id: 'q3', label: 'Q3', value: data.q3, x: xScale(data.q3), y: boxY - 50, priority: 1 },
-      { id: 'max', label: 'Maximum', value: data.max, x: xScale(data.max), y: whiskerY - 60, priority: 2 },
+      {
+        id: 'min',
+        label: 'Minimum',
+        value: data.min,
+        x: xScale(data.min),
+        y: whiskerY - 60,
+        flip: whiskerY - 60 < minY, // flip if too close to top
+        priority: 2
+      },
+      {
+        id: 'q1',
+        label: 'Q1',
+        value: data.q1,
+        x: xScale(data.q1),
+        y: boxY - 50,
+        flip: boxY - 50 < minY, // flip if too close to top
+        priority: 1
+      },
+      {
+        id: 'median',
+        label: 'Median',
+        value: data.median,
+        x: xScale(data.median),
+        y: boxY + boxHeight + 50,
+        flip: false, // median is below the box, always render above
+        priority: 3
+      },
+      {
+        id: 'q3',
+        label: 'Q3',
+        value: data.q3,
+        x: xScale(data.q3),
+        y: boxY - 50,
+        flip: boxY - 50 < minY, // flip if too close to top
+        priority: 1
+      },
+      {
+        id: 'max',
+        label: 'Maximum',
+        value: data.max,
+        x: xScale(data.max),
+        y: whiskerY - 60,
+        flip: whiskerY - 60 < minY, // flip if too close to top
+        priority: 2
+      },
     ];
 
-    // Step 2: Detect overlaps and resolve using priority-based filtering
+    // Step 2: Apply boundary constraints - clamp y positions and adjust flip if needed
+    const constrainedLabels = labels.map(label => {
+      let { y, flip } = label;
+      
+      if (flip) {
+        // Rendering below: y is the top of the tooltip, so y + TOOLTIP_HEIGHT must be <= maxY
+        const constrainedY = Math.min(y, maxY);
+        // If we had to clamp and the original position would have worked above, switch to above
+        if (constrainedY < minY && y >= minY) {
+          return { ...label, y: minY, flip: false };
+        }
+        return { ...label, y: constrainedY };
+      } else {
+        // Rendering above: y is the bottom of the tooltip, so y - TOOLTIP_HEIGHT must be >= minY
+        const constrainedY = Math.max(y, minY);
+        // If we had to clamp and the original position would have worked below, switch to below
+        if (constrainedY > maxY && y <= maxY) {
+          return { ...label, y: maxY, flip: true };
+        }
+        return { ...label, y: constrainedY };
+      }
+    });
+
+    // Step 3: Detect overlaps and resolve using priority-based filtering
     const resolveOverlaps = (items: LabelConfig[]): LabelConfig[] => {
       const sortedByPriority = [...items].sort((a, b) => b.priority - a.priority);
       const kept: LabelConfig[] = [];
 
       for (const item of sortedByPriority) {
-        const itemBox = {
-          left: item.x - TOOLTIP_WIDTH / 2,
-          right: item.x + TOOLTIP_WIDTH / 2,
-          top: item.y - TOOLTIP_HEIGHT,
-          bottom: item.y
-        };
+        // Calculate bounding box based on flip direction
+        const itemBox = item.flip
+          ? {
+              left: item.x - TOOLTIP_WIDTH / 2,
+              right: item.x + TOOLTIP_WIDTH / 2,
+              top: item.y,
+              bottom: item.y + TOOLTIP_HEIGHT
+            }
+          : {
+              left: item.x - TOOLTIP_WIDTH / 2,
+              right: item.x + TOOLTIP_WIDTH / 2,
+              top: item.y - TOOLTIP_HEIGHT,
+              bottom: item.y
+            };
 
         let hasOverlap = false;
         for (const keptItem of kept) {
-          const keptBox = {
-            left: keptItem.x - TOOLTIP_WIDTH / 2,
-            right: keptItem.x + TOOLTIP_WIDTH / 2,
-            top: keptItem.y - TOOLTIP_HEIGHT,
-            bottom: keptItem.y
-          };
+          const keptBox = keptItem.flip
+            ? {
+                left: keptItem.x - TOOLTIP_WIDTH / 2,
+                right: keptItem.x + TOOLTIP_WIDTH / 2,
+                top: keptItem.y,
+                bottom: keptItem.y + TOOLTIP_HEIGHT
+              }
+            : {
+                left: keptItem.x - TOOLTIP_WIDTH / 2,
+                right: keptItem.x + TOOLTIP_WIDTH / 2,
+                top: keptItem.y - TOOLTIP_HEIGHT,
+                bottom: keptItem.y
+              };
 
           // Check for rectangle intersection
           const overlaps = !(
@@ -105,8 +190,8 @@ const useLabelPositions = (
       return kept.sort((a, b) => a.x - b.x);
     };
 
-    return resolveOverlaps(labels);
-  }, [data, xScale, boxY, whiskerY, boxHeight]);
+    return resolveOverlaps(constrainedLabels);
+  }, [data, xScale, boxY, whiskerY, boxHeight, topRegionHeight]);
 };
 
 // The Probability Density Function (PDF) for a Normal Distribution
@@ -186,8 +271,13 @@ const LiveIndicator: React.FC<LiveIndicatorProps> = ({ badgeType = 'live', badge
   );
 };
 
-const Tooltip: React.FC<{ label: string; value: string; x: number; y: number }> = ({ label, value, x, y }) => (
-  <foreignObject x={x - 40} y={y - 45} width={80} height={40}>
+const Tooltip: React.FC<{ label: string; value: string; x: number; y: number; flip?: boolean }> = ({ label, value, x, y, flip = false }) => (
+  <foreignObject
+    x={x - 40}
+    y={flip ? y : y - 45}
+    width={80}
+    height={40}
+  >
     <div className="bg-slate-800 text-white text-xs px-2 py-1 rounded shadow-lg text-center">
       <div className="font-medium">{label}</div>
       <div className="text-slate-300">{value}</div>
@@ -253,16 +343,27 @@ const RegionDashedLines: React.FC<{
 
 export const StatisticalChart: React.FC<StatisticalChartProps> = ({
   data,
-  width = 1008,
-  height = 630,
+  width = 530,
+  height = 400,
   title = 'Revenue Growth vs MRR',
   description = 'Compare your growth rate and revenue scale against peer benchmarks',
   badgeType = 'live',
   badgeText
 }) => {
+  // Calculate available space for the chart
+  const containerPadding = 16; // p-4 = 16px
+  const headerHeight = 80; // Approximate header height (title + description + badge + margins)
+  
+  const availableWidth = width - (containerPadding * 2);
+  const availableHeight = height - (containerPadding * 2) - headerHeight;
+  
+  // Ensure minimum dimensions
+  const chartWidth = Math.max(availableWidth, 400);
+  const chartHeight = Math.max(availableHeight, 200);
+
   const margin = { top: 10, right: 40, bottom: 40, left: 60 };
-  const innerWidth = width - margin.left - margin.right;
-  const innerHeight = height - margin.top - margin.bottom;
+  const innerWidth = chartWidth - margin.left - margin.right;
+  const innerHeight = chartHeight - margin.top - margin.bottom;
 
   // Split the inner height into two equal regions
   const regionGap = 30; // gap between the two regions (includes space for top x-axis labels)
@@ -331,7 +432,7 @@ export const StatisticalChart: React.FC<StatisticalChartProps> = ({
   const whiskerY = boxY + boxHeight / 2;
 
   // Calculate label positions with collision detection and priority-based filtering
-  const labelPositions = useLabelPositions(data, xScale, boxY, whiskerY, boxHeight);
+  const labelPositions = useLabelPositions(data, xScale, boxY, whiskerY, boxHeight, topRegionHeight);
 
   // Standard deviation markers (shared between both regions)
   const stdMarkers = useMemo(() => {
@@ -355,8 +456,8 @@ export const StatisticalChart: React.FC<StatisticalChartProps> = ({
   const bottomRegionY = margin.top + topRegionHeight + regionGap;
 
   return (
-    <div className="relative p-6 bg-white rounded-xl border border-slate-200 shadow-sm">
-      <div className="mb-4">
+    <div className="relative p-4 bg-white rounded-xl border border-slate-200 shadow-sm">
+      <div className="mb-3">
         <div className="flex items-center justify-between">
           <h2
             style={{
@@ -387,8 +488,8 @@ export const StatisticalChart: React.FC<StatisticalChartProps> = ({
         </p>
       </div>
 
-      <div className="rounded-lg border border-gray-200">
-        <svg width={width} height={height} className="overflow-visible">
+      <div className="rounded-lg border border-gray-200 flex items-center justify-center">
+        <svg width={chartWidth} height={chartHeight} className="overflow-visible">
         <defs>
           <linearGradient id="bellCurveGradient" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.3" />
@@ -482,6 +583,7 @@ export const StatisticalChart: React.FC<StatisticalChartProps> = ({
               value={`${pos.value.toFixed(2)}`}
               x={pos.x}
               y={pos.y}
+              flip={pos.flip}
             />
           ))}
 
